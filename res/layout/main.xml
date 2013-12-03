@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="fill_parent"
+    android:layout_height="fill_parent"
+    android:orientation="vertical" android:id="@+id/mainListLayout">
+
+    <ListView
+        android:id="@+android:id/list"
+        android:layout_width="fill_parent"
+        android:layout_height="0dip"
+        android:layout_weight="0.11" >
+    </ListView>
+
+    <Button
+        android:id="@+id/buyAllButton"
+        android:layout_width="fill_parent"
+        android:layout_height="wrap_content"
+        android:text="Buy All Chapters for $9.99"
+        android:textSize="18sp"/>
+
+</LinearLayout>

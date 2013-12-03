@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TableLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="fill_parent"
+    android:layout_height="fill_parent"
+    android:stretchColumns="0"
+    android:shrinkColumns="0">
+    
+    <TableRow>
+        
+        <TextView
+            android:id="@+id/label"
+            android:padding="10dp"
+            android:textSize="24sp"
+            android:fadingEdge="horizontal"
+            android:maxLines="1"
+            android:fadingEdgeLength="25dp"
+            android:ellipsize="end"
+            android:lines="1"
+            android:scrollHorizontally="true"
+            android:typeface="normal"/>
+
+        <ProgressBar
+            android:id="@+id/progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:minWidth="100dp"
+            android:maxWidth="100dp" android:paddingTop="10dp" android:paddingBottom="10dp" android:paddingLeft="4dp" android:paddingRight="4dp"/>
+    
+    </TableRow>
+
+</TableLayout>

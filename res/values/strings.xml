@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+  <string name="hello">If you can walk, you can ski!</string>
+  <string name="app_name">XC Ski School</string>
+  <string-array name="chapters">
+    <item>Introduction</item>
+    <item>Can You Cross Country Ski\?</item>
+    <item>Equipment</item>
+    <item>History of Cross Country Skiing</item>
+    <item>Posture</item>
+    <item>Eyes Ahead</item>
+    <item>Go for a Walk</item>
+    <item>Groomed Resorts</item>
+    <item>In The Tracks</item>
+    <item>Ski Poles</item>
+    <item>How to Fall</item>
+    <item>How to Get Up</item>
+    <item>Jogging</item>
+    <item>Wobbles</item>
+    <item>Straight Arms Go Faster</item>
+    <item>Getting In and Out of the Tracks</item>
+    <item>Stopping</item>
+    <item>Step Turns</item>
+    <item>Wedge Turns</item>
+    <item>Using the Ski Poles</item>
+    <item>Hill Climbing</item>
+  </string-array>
+
+</resources>
