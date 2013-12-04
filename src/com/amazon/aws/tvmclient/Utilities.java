@@ -12,7 +12,7 @@
  * express or implied. See the License for the specific language governing
  * permissions and limitations under the License.
  */
- 
+
 package com.amazon.aws.tvmclient;
 
 import java.util.Date;
@@ -24,6 +24,10 @@ import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.AWSSessionCredentials;
 import com.amazonaws.auth.SigningAlgorithm;
 import com.amazonaws.util.DateUtils;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import org.apache.commons.codec.binary.Base64;
+
 
 public class Utilities {
     private static final String LOG_TAG = "Utilities";
@@ -55,9 +59,15 @@ public class Utilities {
         protected void addSessionCredentials(Request request, AWSSessionCredentials credentials) {
         }
         
-        public String getSignature( String dataToSign, String key ) {
+        public String getSignature( String content, String key ) {
             try {
-                return super.sign( dataToSign.getBytes( "UTF-8" ), key, SigningAlgorithm.HmacSHA256 );
+              byte[] data = content.getBytes( "UTF8" );
+              Mac mac = Mac.getInstance( "HmacSHA256" );
+              mac.init( new SecretKeySpec( key.getBytes( "UTF8" ), "HmacSHA256" ) );
+              byte[] signature = Base64.encodeBase64( mac.doFinal( data ) );
+              return new String( signature, "UTF8" );
+
+//                return super.sign( dataToSign, key.getBytes(), SigningAlgorithm.HmacSHA256 );
             }
             catch ( Exception exception ) {
                 return null;

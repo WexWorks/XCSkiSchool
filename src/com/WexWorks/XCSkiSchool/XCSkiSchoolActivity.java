@@ -6,10 +6,12 @@ import com.WexWorks.XCSkiSchool.Consts.PurchaseState;
 import com.WexWorks.XCSkiSchool.Consts.ResponseCode;
 import com.amazon.aws.tvmclient.Response;
 
+import android.annotation.SuppressLint;
 import android.app.ListActivity;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.os.StrictMode;
 import android.net.Uri;
 import android.content.Intent;
 import android.content.Context;
@@ -47,9 +49,9 @@ public class XCSkiSchoolActivity extends ListActivity {
   private static final String TAG = "XCSkiSchool";
   private static final String DB_INITIALIZED = "db_initialized";
   private static final String SKU_SUFFIX = "_003";
-  private static final int FREE_CHAPTER_COUNT = 10;
-  private static final int MIN_BUY_ALL = 5;
-  private static final int BUY_ALL_DISCOUNT = 2;
+  private static final int FREE_CHAPTER_COUNT = 3;
+  private static final int MIN_BUY_ALL = 1;
+  private static final int BUY_ALL_DISCOUNT = 13;
   public Chapter[] mChapter;
   private boolean mBillingSupported;
   private BillingService mBillingService;
@@ -59,6 +61,8 @@ public class XCSkiSchoolActivity extends ListActivity {
   private boolean[] mBoughtAllOwned;
 
   private static String buyAllSKU(int dollars) {
+    if (dollars < 0)
+      dollars = 0;
     return "buyall_" + dollars + "99" + SKU_SUFFIX;
   }
   
@@ -101,6 +105,11 @@ public class XCSkiSchoolActivity extends ListActivity {
         purchaseItem(request.mProductId);
       } else if (responseCode == ResponseCode.RESULT_USER_CANCELED) {
         di("user canceled purchase");
+      } else if (responseCode == ResponseCode.RESULT_DEVELOPER_ERROR) {
+      } else if (responseCode == ResponseCode.RESULT_BILLING_UNAVAILABLE) {
+      } else if (responseCode == ResponseCode.RESULT_ITEM_UNAVAILABLE) {
+      } else if (responseCode == ResponseCode.RESULT_SERVICE_UNAVAILABLE) {
+      } else if (responseCode == ResponseCode.RESULT_USER_CANCELED) {
       } else {
         di("purchase failed");
       }
@@ -162,10 +171,20 @@ public class XCSkiSchoolActivity extends ListActivity {
     }
   }
 
+  @SuppressLint("NewApi")
   @Override
   public void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
 
+    // Hack to allow HTTP requests on the main thread.
+    // Now deprecated, but we'd need to change a bunch of
+    // logic in the AWS communication to defer processing.
+    if (android.os.Build.VERSION.SDK_INT > 9) {
+      StrictMode.ThreadPolicy policy = 
+              new StrictMode.ThreadPolicy.Builder().permitAll().build();
+      StrictMode.setThreadPolicy(policy);
+    } 
+        
     String state = Environment.getExternalStorageState();
     boolean externalStorageAvailable = false;
     boolean externalStorageWriteable = false;
@@ -232,8 +251,7 @@ public class XCSkiSchoolActivity extends ListActivity {
     mBillingService.setContext(this);
 
     ResponseHandler.register(mPurchaseObserver);
-    if (!mBillingService.checkBillingSupported())
-      mBillingSupported = false;
+    mBillingSupported = mBillingService.checkBillingSupported();
   }
 
   @Override
@@ -295,6 +313,7 @@ public class XCSkiSchoolActivity extends ListActivity {
       }
     } else if (mChapter[position].owned) { // Download
       mChapter[position].dl = new DownloadChapter(this);
+//      mChapter[position].dl.wipeCredentials();
       Response awsResponse = mChapter[position].dl.validateCredentials();
       if (awsResponse != null && awsResponse.requestWasSuccessful()) {
         mChapter[position].dl.execute(position);
@@ -309,6 +328,8 @@ public class XCSkiSchoolActivity extends ListActivity {
           Log.e(TAG, "Billing failed, disabling");
           mBillingSupported = false;
         }
+      } else {
+        // Display billing not supported alert
       }
     }
   }
@@ -353,13 +374,15 @@ public class XCSkiSchoolActivity extends ListActivity {
         if (!mChapter[j].owned)
           forsaleCount++;
       }
-      if (forsaleCount - BUY_ALL_DISCOUNT < MIN_BUY_ALL) {
+      if (forsaleCount < MIN_BUY_ALL) {
         mainViewGroup.removeViewAt(1);
         mBuyAllSKU = "";
       } else {
         Button buyAllButton = (Button) mainViewGroup.getChildAt(1);
         if (buyAllButton != null) {
           int dollars = forsaleCount - BUY_ALL_DISCOUNT;
+          if (dollars < 0)
+            dollars = 0;
           String buttonText = "Buy All Chapters for $" + dollars + ".99";
           buyAllButton.setText(buttonText);
           mBuyAllSKU = buyAllSKU(dollars);

@@ -35,6 +35,11 @@ public class DownloadChapter extends AsyncTask<Integer, Integer, String> {
     mChapterIdx = -1;
   }
   
+  public void wipeCredentials() {
+    SharedPreferences prefs = mXCSkiSchoolActivity.getPreferences(Context.MODE_PRIVATE);
+    AmazonSharedPreferencesWrapper.wipe(prefs);
+  }
+  
   public Response validateCredentials() {
     Response ableToGetToken = Response.SUCCESSFUL;
     SharedPreferences prefs = mXCSkiSchoolActivity.getPreferences(Context.MODE_PRIVATE);

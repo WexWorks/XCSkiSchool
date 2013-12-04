@@ -68,7 +68,7 @@ public class AmazonSharedPreferencesWrapper {
     /**
      * Returns the current Key stored in Shared Preferences.
      */
-    public static String getKeyForDevice( SharedPreferences sharedPreferences ) {
+  public static String getKeyForDevice( SharedPreferences sharedPreferences ) {
         return AmazonSharedPreferencesWrapper.getValueFromSharedPreferences( sharedPreferences, AWS_DEVICE_KEY );
     }
         

@@ -76,7 +76,7 @@ public class AmazonTVMClient {
     public Response getToken() {
         String uid = AmazonSharedPreferencesWrapper.getUidForDevice( this.sharedPreferences );
         String key = AmazonSharedPreferencesWrapper.getKeyForDevice( this.sharedPreferences );
-
+        
         Request getTokenRequest = new GetTokenRequest( this.endpoint, this.useSSL, uid, key );
         ResponseHandler handler = new GetTokenResponseHandler( key );
 

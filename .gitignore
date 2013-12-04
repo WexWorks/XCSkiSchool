@@ -6,6 +6,12 @@
 DerivedData/
 build/
 UX/
+bin/
+gen/
+.classpath
+.project
+.settings/
+lint.xml
 
 #####
 # Xcode private settings (window sizes, bookmarks, breakpoints, custom executables, smart groups)
