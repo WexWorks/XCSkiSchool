@@ -1,21 +1,21 @@
 package com.WexWorks.XCSkiSchool;
 
-import com.WexWorks.XCSkiSchool.BillingService.RequestPurchase;
-import com.WexWorks.XCSkiSchool.BillingService.RestoreTransactions;
-import com.WexWorks.XCSkiSchool.Consts.PurchaseState;
-import com.WexWorks.XCSkiSchool.Consts.ResponseCode;
+import com.WexWorks.XCSkiSchool.util.IabHelper;
+import com.WexWorks.XCSkiSchool.util.IabResult;
+import com.WexWorks.XCSkiSchool.util.Inventory;
+import com.WexWorks.XCSkiSchool.util.Purchase;
+
 import com.amazon.aws.tvmclient.Response;
 
 import android.annotation.SuppressLint;
+import android.app.AlertDialog;
 import android.app.ListActivity;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.Handler;
 import android.os.StrictMode;
 import android.net.Uri;
 import android.content.Intent;
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -47,16 +47,13 @@ class Chapter {
 
 public class XCSkiSchoolActivity extends ListActivity {
   private static final String TAG = "XCSkiSchool";
-  private static final String DB_INITIALIZED = "db_initialized";
   private static final String SKU_SUFFIX = "_003";
   private static final int FREE_CHAPTER_COUNT = 3;
   private static final int MIN_BUY_ALL = 1;
   private static final int BUY_ALL_DISCOUNT = 13;
+  private static final int RC_REQUEST = 10001; // arbitrary code for purchase
   public Chapter[] mChapter;
-  private boolean mBillingSupported;
-  private BillingService mBillingService;
-  private Handler mHandler;
-  private XCSkiSchoolPurchaseObserver mPurchaseObserver;
+  IabHelper mHelper;
   private String mBuyAllSKU;
   private boolean[] mBoughtAllOwned;
 
@@ -67,70 +64,9 @@ public class XCSkiSchoolActivity extends ListActivity {
   }
   
   private static void di(String msg) {
-    if (Consts.DEBUG)
-      Log.i(TAG, msg);
+    Log.i(TAG, msg);
   }
   
-  private class XCSkiSchoolPurchaseObserver extends PurchaseObserver {
-    public XCSkiSchoolPurchaseObserver(Handler handler) {
-      super(XCSkiSchoolActivity.this, handler);
-    }
-
-    @Override
-    public void onBillingSupported(boolean supported) {
-      mBillingSupported = supported;
-      di("Billing supported: " + mBillingSupported);
-      if (supported)
-        restoreDatabase();
-    }
-
-    @Override
-    public void onPurchaseStateChange(PurchaseState purchaseState,
-        String itemId, int quantity, long purchaseTime, String developerPayload) {
-      di("onPurchaseStateChange() itemId: " + itemId + " "
-          + purchaseState + " (" + developerPayload + ")");
-      // Revert purchase of item, since it was already marked as purchased
-      if (purchaseState != PurchaseState.PURCHASED)
-        reversePurchasedItem(itemId);
-    }
-
-    @Override
-    public void onRequestPurchaseResponse(RequestPurchase request,
-        ResponseCode responseCode) {
-      di(request.mProductId + ": " + responseCode);
-      if (responseCode == ResponseCode.RESULT_OK) {
-        di("purchase was successfully sent to server");
-        // Mark item as owned so we don't have to wait for the
-        // response from the market server, which can take *minutes*
-        purchaseItem(request.mProductId);
-      } else if (responseCode == ResponseCode.RESULT_USER_CANCELED) {
-        di("user canceled purchase");
-      } else if (responseCode == ResponseCode.RESULT_DEVELOPER_ERROR) {
-      } else if (responseCode == ResponseCode.RESULT_BILLING_UNAVAILABLE) {
-      } else if (responseCode == ResponseCode.RESULT_ITEM_UNAVAILABLE) {
-      } else if (responseCode == ResponseCode.RESULT_SERVICE_UNAVAILABLE) {
-      } else if (responseCode == ResponseCode.RESULT_USER_CANCELED) {
-      } else {
-        di("purchase failed");
-      }
-    }
-
-    @Override
-    public void onRestoreTransactionsResponse(RestoreTransactions request,
-        ResponseCode responseCode) {
-      if (responseCode == ResponseCode.RESULT_OK) {
-        di("completed RestoreTransactions request");
-        // Only update database once on new install.
-        SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
-        SharedPreferences.Editor edit = prefs.edit();
-        edit.putBoolean(DB_INITIALIZED, true);
-        edit.commit();
-      } else {
-        Log.e(TAG, "RestoreTransactions error: " + responseCode);
-      }
-    }
-  }
-
   private class ChapterAdapter extends ArrayAdapter<Chapter> {
     public ChapterAdapter() {
       // Should reference a TextView?
@@ -203,8 +139,6 @@ public class XCSkiSchoolActivity extends ListActivity {
       finish();
     }
 
-    SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
-
     File externalDir = Environment.getExternalStorageDirectory();
     File appDir = new File (externalDir.getAbsoluteFile() + 
         "/WexWorks/XCSkiSchool/");
@@ -224,8 +158,7 @@ public class XCSkiSchoolActivity extends ListActivity {
       mChapter[i].cached = file.exists();
       mChapter[i].downloading = false;
       mChapter[i].downloadPct = 0;
-      mChapter[i].owned = prefs.getBoolean(mChapter[i].name,
-          i < FREE_CHAPTER_COUNT);
+      mChapter[i].owned = mChapter[i].cached;   // Initialize before restoring
     }
 
     View mainView = getLayoutInflater().inflate(R.layout.main, null);
@@ -244,32 +177,46 @@ public class XCSkiSchoolActivity extends ListActivity {
 
     ChapterAdapter adapter = new ChapterAdapter();
     setListAdapter(adapter);
+    
+    // In-App Billing setup
+    String base64EncodedPublicKey = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArAo8bqGGP0pQ+kSs2vScgOsD65jwZoeLq7BlJR3VAD2bgZ1uq5dUtf+rBI6ZC1PuSu3I2K1Ho8wFIeXnCoQVk6j5JntdtO/FgchPztQ2eXIMrnbNvoxwNezwW+zxNWvdAvzLxM0FjdNmT1VucCJnQIEz/V2O6FGcC8Y1zCJbpX94OJXLhrbzIrIInO86zsOrmLQT9VrwaaGOqbKUbwrM9/QTOwglMqQ2wM1nnC90TihjiR3uo9/vqKSoOXbq96TVsqbJEvfWpn47UPgtPIWjOZhOu7jk+MYMdZ1IMSSGVeiOlW0bviOy6KDsA8UZtdIU7JIgAs0nfcZi+SxxrQXw3QIDAQAB";
+    mHelper = new IabHelper(this, base64EncodedPublicKey);
+    mHelper.enableDebugLogging(false);
+    
+    // Start setup. This is asynchronous and the specified listener
+    // will be called once setup completes.
+    Log.d(TAG, "Starting setup.");
+    mHelper.startSetup(new IabHelper.OnIabSetupFinishedListener() {
+      public void onIabSetupFinished(IabResult result) {
+        Log.d(TAG, "Setup finished.");
 
-    mHandler = new Handler();
-    mPurchaseObserver = new XCSkiSchoolPurchaseObserver(mHandler);
-    mBillingService = new BillingService();
-    mBillingService.setContext(this);
+        if (!result.isSuccess()) {
+          // Oh noes, there was a problem.
+          alert("Problem setting up in-app billing: " + result);
+          return;
+        }
 
-    ResponseHandler.register(mPurchaseObserver);
-    mBillingSupported = mBillingService.checkBillingSupported();
+        // Have we been disposed of in the meantime? If so, quit.
+        if (mHelper == null) return;
+
+        // IAB is fully set up. Now, let's get an inventory of stuff we own.
+        Log.d(TAG, "Setup successful. Querying inventory.");
+        mHelper.queryInventoryAsync(mGotInventoryListener);
+      }
+    });
   }
 
+  // We're being destroyed. It's important to dispose of the helper here!
   @Override
-  protected void onStart() {
-    super.onStart();
-    ResponseHandler.register(mPurchaseObserver);
-  }
+  public void onDestroy() {
+      super.onDestroy();
 
-  @Override
-  protected void onStop() {
-    super.onStop();
-    ResponseHandler.unregister(mPurchaseObserver);
-  }
-
-  @Override
-  protected void onDestroy() {
-    super.onDestroy();
-    mBillingService.unbind();
+      // very important:
+      Log.d(TAG, "Destroying helper.");
+      if (mHelper != null) {
+          mHelper.dispose();
+          mHelper = null;
+      }
   }
 
   /**
@@ -289,6 +236,97 @@ public class XCSkiSchoolActivity extends ListActivity {
     super.onRestoreInstanceState(savedInstanceState);
     if (savedInstanceState != null) {
     }
+  }
+
+  boolean verifyDeveloperPayload(Purchase p) {
+    String payload = p.getDeveloperPayload();
+
+    /*
+     * TODO: verify that the developer payload of the purchase is correct. It will be
+     * the same one that you sent when initiating the purchase.
+     *
+     * WARNING: Locally generating a random string when starting a purchase and
+     * verifying it here might seem like a good approach, but this will fail in the
+     * case where the user purchases an item on one device and then uses your app on
+     * a different device, because on the other device you will not have access to the
+     * random string you originally generated.
+     *
+     * So a good developer payload has these characteristics:
+     *
+     * 1. If two different users purchase an item, the payload is different between them,
+     *    so that one user's purchase can't be replayed to another user.
+     *
+     * 2. The payload must be such that you can verify it even when the app wasn't the
+     *    one who initiated the purchase flow (so that items purchased by the user on
+     *    one device work on other devices owned by the user).
+     *
+     * Using your own server to store and verify developer payloads across app
+     * installations is recommended.
+     */
+
+    return true;
+  }
+
+  // Listener that's called when we finish querying the items and subscriptions we own
+  IabHelper.QueryInventoryFinishedListener mGotInventoryListener = new IabHelper.QueryInventoryFinishedListener() {
+    public void onQueryInventoryFinished(IabResult result, Inventory inventory) {
+      Log.d(TAG, "Query inventory finished.");
+
+      // Have we been disposed of in the meantime? If so, quit.
+      if (mHelper == null) return;
+
+      // Is it a failure?
+      if (result.isFailure()) {
+        alert("Failed to query inventory: " + result);
+        return;
+      }
+
+      Log.d(TAG, "Query inventory was successful.");
+      List<String> ownedSkuList = inventory.getAllOwnedSkus();
+      for (String sku : ownedSkuList) {
+        purchaseItem(sku);
+      }
+      Log.d(TAG, "Initial inventory query finished; enabling main UI.");
+    }
+  };
+
+  // Callback for when a purchase is finished
+  IabHelper.OnIabPurchaseFinishedListener mPurchaseFinishedListener = new IabHelper.OnIabPurchaseFinishedListener() {
+    public void onIabPurchaseFinished(IabResult result, Purchase purchase) {
+      Log.d(TAG, "Purchase finished: " + result + ", purchase: " + purchase);
+
+      // if we were disposed of in the meantime, quit.
+      if (mHelper == null) return;
+
+      if (result.isFailure()) {
+        alert("Error purchasing: " + result);
+        return;
+      }
+      if (!verifyDeveloperPayload(purchase)) {
+        alert("Error purchasing. Authenticity verification failed.");
+        return;
+      }
+
+      Log.d(TAG, "Purchase successful.");
+      purchaseItem(purchase.getSku());
+    }
+  };
+
+  @Override
+  protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+      Log.d(TAG, "onActivityResult(" + requestCode + "," + resultCode + "," + data);
+      if (mHelper == null) return;
+
+      // Pass on the activity result to the helper for handling
+      if (!mHelper.handleActivityResult(requestCode, resultCode, data)) {
+          // not handled, so handle it ourselves (here's where you'd
+          // perform any handling of activity results not related to in-app
+          // billing...
+          super.onActivityResult(requestCode, resultCode, data);
+      }
+      else {
+          Log.d(TAG, "onActivityResult handled by IABUtil.");
+      }
   }
 
   @Override
@@ -323,14 +361,12 @@ public class XCSkiSchoolActivity extends ListActivity {
             Toast.LENGTH_LONG);
       }
     } else { // Purchase
-      if (mBillingSupported) {
-        if (!mBillingService.requestPurchase(mChapter[position].sku, null)) {
-          Log.e(TAG, "Billing failed, disabling");
-          mBillingSupported = false;
-        }
-      } else {
-        // Display billing not supported alert
-      }
+      /* TODO: for security, generate your payload here for verification. See the comments on
+       *        verifyDeveloperPayload() for more info. Since this is a SAMPLE, we just use
+       *        an empty string, but on a production app you should carefully generate this. */
+      String payload = "";
+      mHelper.launchPurchaseFlow(this, mChapter[position].sku, RC_REQUEST,
+          mPurchaseFinishedListener, payload);
     }
   }
 
@@ -344,26 +380,6 @@ public class XCSkiSchoolActivity extends ListActivity {
 
   static String toProperCase(String s) {
     return s.substring(0, 1).toUpperCase() + s.substring(1).toLowerCase();
-  }
-
-  /**
-   * If the database has not been initialized, we send a RESTORE_TRANSACTIONS
-   * request to Android Market to get the list of purchased items for this user.
-   * This happens if the application has just been installed or the user wiped
-   * data. We do not want to do this on every startup, rather, we want to do
-   * only when the database needs to be initialized.
-   */
-  private void restoreDatabase() {
-    SharedPreferences prefs = getPreferences(MODE_PRIVATE);
-    boolean initialized = prefs.getBoolean(DB_INITIALIZED, false);
-    SharedPreferences.Editor edit = prefs.edit();
-    edit.putBoolean(DB_INITIALIZED, true);
-    edit.commit();
-    if (!initialized) {
-      mBillingService.restoreTransactions();
-      Toast.makeText(this, "Restoring purchase transactions",
-          Toast.LENGTH_LONG).show();
-    }
   }
 
   private void updateBuyAll() {
@@ -393,10 +409,12 @@ public class XCSkiSchoolActivity extends ListActivity {
 
   public void buyAll(View view) {
     if (!mBuyAllSKU.equals("")) {
-      if (!mBillingService.requestPurchase(mBuyAllSKU, null)) {
-        Log.e(TAG, "Billing failed for buy-all, disabling");
-        mBillingSupported = false;
-      }
+      /* TODO: for security, generate your payload here for verification. See the comments on
+       *        verifyDeveloperPayload() for more info. Since this is a SAMPLE, we just use
+       *        an empty string, but on a production app you should carefully generate this. */
+      String payload = "";
+      mHelper.launchPurchaseFlow(this, mBuyAllSKU, RC_REQUEST,
+          mPurchaseFinishedListener, payload);
     }
   }
 
@@ -408,8 +426,8 @@ public class XCSkiSchoolActivity extends ListActivity {
   }
   
   private void applyItem(String itemId, ChapterOp op) {
-    int i = mChapter.length - FREE_CHAPTER_COUNT - BUY_ALL_DISCOUNT;
-    for (/* EMPTY */; i >= MIN_BUY_ALL; --i) {
+    int i = 0;
+    for (i = 0; i < mChapter.length; ++i) {
       String sku = buyAllSKU(i);
       if (sku.equals(itemId)) {
         op.allChapters(itemId);
@@ -430,14 +448,10 @@ public class XCSkiSchoolActivity extends ListActivity {
       public void allChapters(String itemId) {
         di("Purchased all chapters successfully!");
         mBoughtAllOwned = new boolean[mChapter.length];
-        SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
-        SharedPreferences.Editor edit = prefs.edit();
         for (int j = FREE_CHAPTER_COUNT; j < mChapter.length; ++j) {
           mBoughtAllOwned[j] = mChapter[j].owned;
           mChapter[j].owned = true;
-          edit.putBoolean(mChapter[j].name, true);
         }
-        edit.commit();
         updateBuyAll();
         getListView().invalidateViews();
       }
@@ -449,10 +463,6 @@ public class XCSkiSchoolActivity extends ListActivity {
         } else {
           di("Purchased \"" + mChapter[i].name + "\" successfully!");
           mChapter[i].owned = true;
-          SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
-          SharedPreferences.Editor edit = prefs.edit();
-          edit.putBoolean(mChapter[i].name, true);
-          edit.commit();
           updateBuyAll();
           getListView().invalidateViews();
         }
@@ -463,12 +473,9 @@ public class XCSkiSchoolActivity extends ListActivity {
   private void reversePurchasedItem(String itemId) {
     applyItem(itemId, new ChapterOp() {
       public void allChapters(String itemId) {
-        if (mBoughtAllOwned.length == mChapter.length) { 
-          SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
-          SharedPreferences.Editor edit = prefs.edit();
+        if (mBoughtAllOwned.length == mChapter.length) {
           for (int j = FREE_CHAPTER_COUNT; j < mChapter.length; ++j) {
             mChapter[j].owned = mBoughtAllOwned[j];
-            edit.putBoolean(mChapter[j].name, mChapter[j].owned);
             if (mChapter[j].downloading && mChapter[j].dl != null)
               mChapter[j].dl.cancel(true);
             File file = new File(mChapter[j].path);
@@ -476,7 +483,6 @@ public class XCSkiSchoolActivity extends ListActivity {
               file.delete();
             mChapter[j].cached = false;
           }
-          edit.commit();
           updateBuyAll();
           getListView().invalidateViews();
           di("Reversed buy all purchase.");
@@ -500,10 +506,6 @@ public class XCSkiSchoolActivity extends ListActivity {
           if (file.exists())
             file.delete();
           mChapter[i].cached = false;
-          SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
-          SharedPreferences.Editor edit = prefs.edit();
-          edit.putBoolean(mChapter[i].name, false);
-          edit.commit();
           updateBuyAll();
           getListView().invalidateViews();
           di("Reversed purchased \"" + mChapter[i].name + "\" successfully.");
@@ -515,4 +517,12 @@ public class XCSkiSchoolActivity extends ListActivity {
     });
   }
   
+  void alert(String message) {
+    AlertDialog.Builder bld = new AlertDialog.Builder(this);
+    bld.setMessage(message);
+    bld.setNeutralButton("OK", null);
+    Log.d(TAG, "Showing alert dialog: " + message);
+    bld.create().show();
+  }
+
 }
